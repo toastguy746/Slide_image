@@ -47,10 +47,17 @@
   .thumb.dragsrc{opacity:.35}
   .thumb.drop-before{box-shadow:0 -4px 0 -1px var(--accent)}
   .thumb.drop-after{box-shadow:0 4px 0 -1px var(--accent)}
-  .thumb .mv{position:absolute;right:10px;bottom:10px;display:flex;gap:3px}
-  .thumb .mv button{width:22px;height:22px;padding:0;border-radius:6px;font-size:9px;line-height:22px;background:rgba(0,0,0,.72);color:#fff}
-  .thumb .mv button:hover{background:var(--accent)}
-  .thumb .mv button:disabled{opacity:.3;background:rgba(0,0,0,.72);cursor:default}
+  .thumb .frame{position:relative}
+  /* 사진 위/아래 가로변에 붙는 사다리꼴 버튼 */
+  .thumb.active{padding-top:20px;padding-bottom:20px}          /* 사다리꼴이 들어갈 여백 */
+  .thumb.active .frame{overflow:visible}
+  .thumb.active .frame img{border-radius:6px}
+  .thumb.active .del{top:26px}
+  .thumb .tz{position:absolute;left:0;width:100%;height:14px;padding:0;border-radius:0;font-size:8px;line-height:14px;color:#fff;background:#000}
+  .thumb .tz.up{top:-14px;clip-path:polygon(25% 0,75% 0,100% 100%,0 100%)}
+  .thumb .tz.dn{bottom:-14px;clip-path:polygon(0 0,100% 0,75% 100%,25% 100%)}
+  .thumb .tz:hover{background:var(--accent)}
+  .thumb .tz:disabled{opacity:.3;background:#000;cursor:default}
 
   .viewer{flex:1;position:relative;min-width:0;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--bg)}
   .stage{position:relative;width:100%;height:100%}
@@ -203,9 +210,9 @@
       el.className = 'thumb' + (i === cur ? ' active' : '');
       el.draggable = true;
       const mv = i === cur
-        ? `<div class="mv"><button class="up" title="위로"${i === 0 ? ' disabled' : ''}>▲</button><button class="dn" title="아래로"${i === photos.length - 1 ? ' disabled' : ''}>▼</button></div>`
+        ? `<button class="tz up" title="위로"${i === 0 ? ' disabled' : ''}>▲</button><button class="tz dn" title="아래로"${i === photos.length - 1 ? ' disabled' : ''}>▼</button>`
         : '';
-      el.innerHTML = `<span class="num">${i + 1}</span><div class="frame"><img src="${p.url}" alt="" draggable="false"></div><button class="del" title="삭제">✕</button>${mv}`;
+      el.innerHTML = `<span class="num">${i + 1}</span><div class="frame"><img src="${p.url}" alt="" draggable="false">${mv}</div><button class="del" title="삭제">✕</button>`;
       el.addEventListener('click', () => show(i));
       el.querySelector('.del').addEventListener('click', e => { e.stopPropagation(); removeAt(i); });
       if (mv) {
