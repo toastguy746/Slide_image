@@ -43,6 +43,14 @@
   .thumb img{width:100%;height:100%;object-fit:cover;display:block}
   .thumb .del{position:absolute;right:10px;top:10px;width:20px;height:20px;padding:0;border-radius:50%;font-size:11px;line-height:20px;background:rgba(0,0,0,.7);color:#fff;display:none}
   .thumb:hover .del{display:block}
+  .thumb{-webkit-user-select:none;user-select:none}
+  .thumb.dragsrc{opacity:.35}
+  .thumb.drop-before{box-shadow:0 -4px 0 -1px var(--accent)}
+  .thumb.drop-after{box-shadow:0 4px 0 -1px var(--accent)}
+  .thumb .mv{position:absolute;right:10px;bottom:10px;display:flex;gap:3px}
+  .thumb .mv button{width:22px;height:22px;padding:0;border-radius:6px;font-size:9px;line-height:22px;background:rgba(0,0,0,.72);color:#fff}
+  .thumb .mv button:hover{background:var(--accent)}
+  .thumb .mv button:disabled{opacity:.3;background:rgba(0,0,0,.72);cursor:default}
 
   .viewer{flex:1;position:relative;min-width:0;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--bg)}
   .stage{position:relative;width:100%;height:100%}
@@ -156,6 +164,7 @@
   let viewerFront = $('imgA'), viewerBack = $('imgB');
   let ssFront = $('ssA'), ssBack = $('ssB');
   let timer = null, paused = false, inSlideshow = false;
+  let dragIdx = null;       // 왼쪽 목록에서 끌고 있는 사진 번호
 
   /* ---------- 업로드 ----------
      input.files 는 파일 탐색기에서 선택된 순서(Shift/Ctrl 클릭 결과)를
@@ -174,9 +183,9 @@
 
   // 드래그 앤 드롭 (드롭된 순서 그대로)
   const main = $('main');
-  ['dragenter','dragover'].forEach(t => main.addEventListener(t, e => { e.preventDefault(); main.classList.add('dragging'); }));
-  ['dragleave','drop'].forEach(t => main.addEventListener(t, e => { e.preventDefault(); main.classList.remove('dragging'); }));
-  main.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+  ['dragenter','dragover'].forEach(t => main.addEventListener(t, e => { if (dragIdx !== null) return; e.preventDefault(); main.classList.add('dragging'); }));
+  ['dragleave','drop'].forEach(t => main.addEventListener(t, e => { if (dragIdx !== null) return; e.preventDefault(); main.classList.remove('dragging'); }));
+  main.addEventListener('drop', e => { if (dragIdx !== null) return; addFiles(e.dataTransfer.files); });
 
   $('clearBtn').addEventListener('click', () => {
     if (!confirm('모든 사진을 삭제할까요?')) return;
@@ -192,12 +201,72 @@
     photos.forEach((p, i) => {
       const el = document.createElement('div');
       el.className = 'thumb' + (i === cur ? ' active' : '');
-      el.innerHTML = `<span class="num">${i + 1}</span><div class="frame"><img src="${p.url}" alt=""></div><button class="del" title="삭제">✕</button>`;
+      el.draggable = true;
+      const mv = i === cur
+        ? `<div class="mv"><button class="up" title="위로"${i === 0 ? ' disabled' : ''}>▲</button><button class="dn" title="아래로"${i === photos.length - 1 ? ' disabled' : ''}>▼</button></div>`
+        : '';
+      el.innerHTML = `<span class="num">${i + 1}</span><div class="frame"><img src="${p.url}" alt="" draggable="false"></div><button class="del" title="삭제">✕</button>${mv}`;
       el.addEventListener('click', () => show(i));
       el.querySelector('.del').addEventListener('click', e => { e.stopPropagation(); removeAt(i); });
+      if (mv) {
+        el.querySelector('.up').addEventListener('click', e => { e.stopPropagation(); if (i > 0) moveTo(i, i - 1); });
+        el.querySelector('.dn').addEventListener('click', e => { e.stopPropagation(); if (i < photos.length - 1) moveTo(i, i + 1); });
+      }
+      el.addEventListener('dragstart', e => {
+        dragIdx = i;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(i));
+        el.classList.add('dragsrc');
+      });
+      el.addEventListener('dragend', () => { dragIdx = null; clearDrop(); el.classList.remove('dragsrc'); });
       thumbs.appendChild(el);
     });
   }
+
+  /* ---------- 순서 바꾸기 (드래그 / 화살표) ---------- */
+  function moveTo(from, to) {
+    const curPhoto = photos[cur];          // 보고 있던 사진은 그대로 유지
+    const [p] = photos.splice(from, 1);
+    photos.splice(to, 0, p);
+    cur = photos.indexOf(curPhoto);
+    renderThumbs(); updateUI();
+    const a = thumbs.children[cur];
+    if (a) a.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  // 마우스 높이를 기준으로 "몇 번째 앞에 끼울지" 계산
+  function dropIndexAt(y) {
+    const els = Array.from(thumbs.children);
+    for (let k = 0; k < els.length; k++) {
+      const r = els[k].getBoundingClientRect();
+      if (y < r.top + r.height / 2) return k;
+    }
+    return els.length;
+  }
+  function clearDrop() {
+    thumbs.querySelectorAll('.drop-before,.drop-after').forEach(e => e.classList.remove('drop-before', 'drop-after'));
+  }
+
+  thumbs.addEventListener('dragover', e => {
+    if (dragIdx === null) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const t = dropIndexAt(e.clientY);
+    clearDrop();
+    const els = thumbs.children;
+    if (t < els.length) els[t].classList.add('drop-before');
+    else if (els.length) els[els.length - 1].classList.add('drop-after');
+  });
+  thumbs.addEventListener('dragleave', e => { if (!thumbs.contains(e.relatedTarget)) clearDrop(); });
+  thumbs.addEventListener('drop', e => {
+    if (dragIdx === null) return;
+    e.preventDefault();
+    let t = dropIndexAt(e.clientY);
+    const from = dragIdx;
+    dragIdx = null; clearDrop();
+    if (t > from) t--;
+    if (t !== from) moveTo(from, t);
+  });
 
   function removeAt(i) {
     release(photos[i]);
