@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>포토 슬라이드</title>
+<style>
+  :root{
+    --bg:#1b1c20; --panel:#23252b; --line:#33363e; --text:#e9eaee; --muted:#8b8f9a; --accent:#4f8cff;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Pretendard","Noto Sans KR",sans-serif;display:flex;flex-direction:column;overflow:hidden}
+
+  /* 상단 바 */
+  .topbar{height:56px;flex:none;display:flex;align-items:center;gap:10px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+  .topbar h1{font-size:16px;font-weight:600;margin-right:auto}
+  .count{color:var(--muted);font-size:13px}
+  button{font:inherit;color:var(--text);background:#2e3139;border:1px solid var(--line);padding:8px 14px;border-radius:8px;cursor:pointer;transition:background .15s}
+  button:hover{background:#383c46}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  .primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .primary:hover{background:#6a9dff}
+
+  /* 본문 */
+  .main{flex:1;display:flex;min-height:0}
+  .thumbs{width:200px;flex:none;overflow-y:auto;background:var(--panel);border-right:1px solid var(--line);padding:12px 10px;display:flex;flex-direction:column;gap:10px}
+  .thumb{position:relative;display:flex;gap:8px;align-items:flex-start;cursor:pointer}
+  .thumb .num{width:18px;font-size:12px;color:var(--muted);text-align:right;padding-top:2px;flex:none}
+  .thumb .frame{flex:1;aspect-ratio:16/10;border:2px solid transparent;border-radius:6px;overflow:hidden;background:#111}
+  .thumb.active .frame{border-color:var(--accent)}
+  .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+  .thumb .del{position:absolute;right:4px;top:4px;width:20px;height:20px;padding:0;border-radius:50%;font-size:12px;line-height:18px;background:rgba(0,0,0,.65);display:none}
+  .thumb:hover .del{display:block}
+
+  .viewer{flex:1;position:relative;min-width:0;display:flex;align-items:center;justify-content:center;padding:24px}
+  .stage{position:relative;width:100%;height:100%}
+  .stage img, .slideshow img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:0;transition:opacity .5s ease}
+  .stage img.on{opacity:1}
+  .navbtn{position:absolute;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:50%;padding:0;font-size:20px;background:rgba(0,0,0,.45);z-index:2}
+  .navbtn.prev{left:12px}.navbtn.next{right:12px}
+  .caption{position:absolute;left:0;right:0;bottom:6px;text-align:center;color:var(--muted);font-size:13px}
+
+  /* 빈 화면 / 드롭존 */
+  .empty{position:absolute;inset:24px;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;border:2px dashed var(--line);border-radius:16px;color:var(--muted);text-align:center}
+  .empty.hidden{display:none}
+  .dragging .empty{border-color:var(--accent);color:var(--text)}
+  .dragging .viewer{outline:2px dashed var(--accent);outline-offset:-10px}
+
+  /* 모달 (배포 / 받기) */
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;display:none;align-items:center;justify-content:center;padding:20px}
+  .modal.open{display:flex}
+  .box{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:28px 32px;min-width:300px;max-width:420px;text-align:center;display:flex;flex-direction:column;gap:14px}
+  .box h2{font-size:17px}
+  .box p{color:var(--muted);font-size:14px;line-height:1.5}
+  .code{font-size:60px;font-weight:700;letter-spacing:12px;padding-left:12px;color:#fff;font-variant-numeric:tabular-nums}
+  .codein{font-size:36px;text-align:center;letter-spacing:10px;width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:#16171b;color:#fff;outline:none}
+  .codein:focus{border-color:var(--accent)}
+  .bar{height:6px;border-radius:3px;background:#16171b;overflow:hidden}
+  .bar>div{height:100%;width:0;background:var(--accent);transition:width .25s}
+  .err{color:#ff7a7a !important}
+  .row{display:flex;gap:8px;justify-content:center}
+
+  /* 슬라이드쇼 (전체 화면) */
+  .slideshow{position:fixed;inset:0;background:#000;z-index:100;display:none;cursor:none}
+  .slideshow.open{display:block}
+  .slideshow img{transform:scale(1);transition:opacity 1.2s ease, transform 8s ease-out}
+  .slideshow img.on{opacity:1;transform:scale(1.03)}
+  .progress{position:absolute;left:0;bottom:0;height:3px;background:rgba(255,255,255,.7);width:0;z-index:3}
+  .progress.run{width:100%;transition:width 6s linear}
+  .ss-hint{position:absolute;top:14px;right:18px;color:rgba(255,255,255,.55);font-size:13px;z-index:3;opacity:1;transition:opacity .8s}
+  .ss-hint.fade{opacity:0}
+
+  @media (max-width:700px){
+    .thumbs{width:96px}
+    .thumb .num{display:none}
+    .viewer{padding:10px}
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <button id="pubBtn" disabled>배포</button>
+  <button id="recvBtn">받기</button>
+  <h1 style="margin-left:6px">포토 슬라이드</h1>
+  <span class="count" id="count"></span>
+  <button id="addBtn">사진 추가</button>
+  <button id="clearBtn" disabled>전체 삭제</button>
+  <button id="slideBtn" class="primary" disabled>▶ 슬라이드</button>
+  <input type="file" id="file" accept="image/*" multiple hidden>
+</header>
+
+<div class="main" id="main">
+  <aside class="thumbs" id="thumbs"></aside>
+  <section class="viewer" id="viewer">
+    <div class="stage" id="stage">
+      <img id="imgA" alt=""><img id="imgB" alt="">
+    </div>
+    <button class="navbtn prev" id="prev" aria-label="이전">‹</button>
+    <button class="navbtn next" id="next" aria-label="다음">›</button>
+    <div class="caption" id="caption"></div>
+    <div class="empty" id="empty">
+      <div style="font-size:42px">🖼️</div>
+      <div>사진을 여기로 끌어다 놓거나<br>아래 버튼으로 여러 장을 선택하세요</div>
+      <button class="primary" id="emptyBtn">사진 선택</button>
+    </div>
+  </section>
+</div>
+
+<div class="modal" id="modal"><div class="box" id="mBody"></div></div>
+
+<div class="slideshow" id="slideshow">
+  <img id="ssA" alt=""><img id="ssB" alt="">
+  <div class="progress" id="progress"></div>
+  <div class="ss-hint" id="hint">← → 이동 · Space 일시정지 · Esc 종료</div>
+</div>
+
+<script>
+(() => {
+  const INTERVAL = 6000; // 6초
+  const $ = id => document.getElementById(id);
+  const fileInput = $('file'), thumbs = $('thumbs'), stage = $('stage');
+  const slideshow = $('slideshow'), progress = $('progress'), hint = $('hint');
+
+  let photos = [];          // {url, name}
+  let cur = 0;
+  let viewerFront = $('imgA'), viewerBack = $('imgB');
+  let ssFront = $('ssA'), ssBack = $('ssB');
+  let timer = null, paused = false, inSlideshow = false;
+
+  /* ---------- 업로드 ----------
+     input.files 는 파일 탐색기에서 선택된 순서(Shift/Ctrl 클릭 결과)를
+     그대로 담고 있으므로 그 순서를 변경 없이 사용한다. */
+  function addFiles(list) {
+    const files = Array.from(list).filter(f => f.type.startsWith('image/'));
+    if (!files.length) return;
+    const wasEmpty = photos.length === 0;
+    files.forEach(f => photos.push({ url: URL.createObjectURL(f), name: f.name, file: f }));
+    renderThumbs();
+    if (wasEmpty) show(0, true); else updateUI();
+  }
+
+  fileInput.addEventListener('change', e => { addFiles(e.target.files); fileInput.value = ''; });
+  ['addBtn','emptyBtn'].forEach(id => $(id).addEventListener('click', () => fileInput.click()));
+
+  // 드래그 앤 드롭 (드롭된 순서 그대로)
+  const main = $('main');
+  ['dragenter','dragover'].forEach(t => main.addEventListener(t, e => { e.preventDefault(); main.classList.add('dragging'); }));
+  ['dragleave','drop'].forEach(t => main.addEventListener(t, e => { e.preventDefault(); main.classList.remove('dragging'); }));
+  main.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+
+  $('clearBtn').addEventListener('click', () => {
+    if (!confirm('모든 사진을 삭제할까요?')) return;
+    photos.forEach(release);
+    photos = []; cur = 0;
+    viewerFront.classList.remove('on'); viewerBack.classList.remove('on');
+    renderThumbs(); updateUI();
+  });
+
+  /* ---------- 썸네일 ---------- */
+  function renderThumbs() {
+    thumbs.innerHTML = '';
+    photos.forEach((p, i) => {
+      const el = document.createElement('div');
+      el.className = 'thumb' + (i === cur ? ' active' : '');
+      el.innerHTML = `<span class="num">${i + 1}</span><div class="frame"><img src="${p.url}" alt=""></div><button class="del" title="삭제">✕</button>`;
+      el.addEventListener('click', () => show(i));
+      el.querySelector('.del').addEventListener('click', e => { e.stopPropagation(); removeAt(i); });
+      thumbs.appendChild(el);
+    });
+  }
+
+  function removeAt(i) {
+    release(photos[i]);
+    photos.splice(i, 1);
+    if (cur >= photos.length) cur = Math.max(0, photos.length - 1);
+    renderThumbs();
+    if (photos.length) show(cur, true); else updateUI();
+  }
+
+  /* ---------- 일반 뷰어 (페이드 전환) ---------- */
+  function crossfade(front, back, url) {
+    back.onload = () => { back.classList.add('on'); front.classList.remove('on'); };
+    back.src = url;
+    if (back.complete && back.naturalWidth) back.onload();
+  }
+
+  function show(i, force) {
+    if (!photos.length) return updateUI();
+    if (i === cur && !force && viewerFront.classList.contains('on')) return;
+    cur = (i + photos.length) % photos.length;
+    crossfade(viewerFront, viewerBack, photos[cur].url);
+    [viewerFront, viewerBack] = [viewerBack, viewerFront];
+    thumbs.querySelectorAll('.thumb').forEach((t, idx) => t.classList.toggle('active', idx === cur));
+    const active = thumbs.children[cur];
+    if (active) active.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    updateUI();
+  }
+
+  function updateUI() {
+    const n = photos.length;
+    $('count').textContent = n ? `${cur + 1} / ${n}` : '';
+    $('caption').textContent = n ? photos[cur].name : '';
+    $('empty').classList.toggle('hidden', n > 0);
+    $('slideBtn').disabled = n === 0;
+    $('pubBtn').disabled = n === 0;
+    $('clearBtn').disabled = n === 0;
+    $('prev').style.display = $('next').style.display = n > 1 ? '' : 'none';
+  }
+
+  $('prev').addEventListener('click', () => show(cur - 1));
+  $('next').addEventListener('click', () => show(cur + 1));
+
+  /* ---------- 슬라이드쇼 ---------- */
+  function ssShow(i, instant) {
+    cur = (i + photos.length) % photos.length;
+    if (instant) {
+      ssFront.style.transition = ssBack.style.transition = 'none';
+    }
+    crossfade(ssFront, ssBack, photos[cur].url);
+    [ssFront, ssBack] = [ssBack, ssFront];
+    if (instant) requestAnimationFrame(() => { ssFront.style.transition = ssBack.style.transition = ''; });
+    // 이전 이미지의 확대 상태가 자연스럽게 풀리도록 off 된 쪽 transform 은 transition 으로 복귀
+    restartProgress();
+  }
+
+  function restartProgress() {
+    progress.classList.remove('run');
+    void progress.offsetWidth;
+    if (!paused) progress.classList.add('run');
+  }
+
+  function schedule() {
+    clearInterval(timer);
+    timer = setInterval(() => { if (!paused) ssShow(cur + 1); }, INTERVAL);
+  }
+
+  async function startSlideshow() {
+    if (!photos.length) return;
+    inSlideshow = true; paused = false;
+    slideshow.classList.add('open');
+    ssFront.classList.remove('on'); ssBack.classList.remove('on');
+    ssShow(cur, true);
+    schedule();
+    hint.classList.remove('fade');
+    setTimeout(() => hint.classList.add('fade'), 3000);
+    try {
+      if (slideshow.requestFullscreen) await slideshow.requestFullscreen();
+      else if (slideshow.webkitRequestFullscreen) slideshow.webkitRequestFullscreen();
+    } catch (_) { /* 전체화면이 막혀도 화면 가득 오버레이로 동작 */ }
+  }
+
+  function stopSlideshow() {
+    if (!inSlideshow) return;
+    inSlideshow = false;
+    clearInterval(timer);
+    slideshow.classList.remove('open');
+    progress.classList.remove('run');
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    show(cur, true);
+  }
+
+  $('slideBtn').addEventListener('click', startSlideshow);
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && inSlideshow) stopSlideshow();
+  });
+
+  slideshow.addEventListener('click', () => {
+    paused = !paused;
+    if (paused) progress.classList.remove('run'); else { restartProgress(); schedule(); }
+  });
+
+  /* ---------- 키보드 ---------- */
+  document.addEventListener('keydown', e => {
+    if ($('modal').classList.contains('open')) {
+      if (e.key === 'Escape' && !busy) closeModal();
+      return;
+    }
+    if (!photos.length) return;
+    if (inSlideshow) {
+      if (e.key === 'Escape') stopSlideshow();
+      else if (e.key === 'ArrowRight') { ssShow(cur + 1); schedule(); }
+      else if (e.key === 'ArrowLeft') { ssShow(cur - 1); schedule(); }
+      else if (e.key === ' ') { e.preventDefault(); slideshow.click(); }
+    } else {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') show(cur + 1);
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') show(cur - 1);
+    }
+  });
+
+  slideshow.addEventListener('mousemove', () => {
+    slideshow.style.cursor = 'default';
+    clearTimeout(slideshow._c);
+    slideshow._c = setTimeout(() => slideshow.style.cursor = 'none', 2000);
+  });
+
+  /* ---------- 배포 / 받기 ---------- */
+  const modal = $('modal'), mBody = $('mBody');
+  let busy = false;
+
+  function openModal(html) { mBody.innerHTML = html; modal.classList.add('open'); }
+  function closeModal() { modal.classList.remove('open'); }
+  modal.addEventListener('click', e => { if (e.target === modal && !busy) closeModal(); });
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+  async function api(path, opts) {
+    const r = await fetch(path, opts);
+    let data = null;
+    try { data = await r.json(); } catch (_) {}
+    if (!r.ok) throw new Error((data && data.error) || `서버 오류 (${r.status})`);
+    return data;
+  }
+
+  // 서버 용량/요청 제한(4.5MB)을 피하려고 긴 변 2000px 이하 JPEG 로 줄여서 올림
+  async function toJpeg(p) {
+    const src = p.file || await (await fetch(p.url)).blob();
+    const bmp = await createImageBitmap(src, { imageOrientation: 'from-image' });
+    const s = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    if (bmp.close) bmp.close();
+    let q = 0.85;
+    let out = await new Promise(r => c.toBlob(r, 'image/jpeg', q));
+    while (out.size > 4 * 1024 * 1024 && q > 0.4) {
+      q -= 0.15;
+      out = await new Promise(r => c.toBlob(r, 'image/jpeg', q));
+    }
+    return out;
+  }
+
+  async function publish() {
+    if (!photos.length || busy) return;
+    busy = true;
+    const snapshot = photos.slice();
+    const total = snapshot.length;
+    try {
+      openModal(`<h2>배포 중…</h2><div class="bar"><div id="pbar"></div></div><p id="ptxt">번호 생성 중</p>`);
+      const { code } = await api('/api/start', { method: 'POST' });
+
+      const urls = new Array(total);
+      let done = 0, next = 0;
+      const worker = async () => {
+        while (next < total) {
+          const i = next++;
+          const blob = await toJpeg(snapshot[i]);
+          const r = await api(`/api/upload?code=${code}&i=${i}`, {
+            method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob
+          });
+          urls[i] = r.url;
+          done++;
+          $('pbar').style.width = (done / total * 100) + '%';
+          $('ptxt').textContent = `업로드 ${done} / ${total}`;
+        }
+      };
+      await Promise.all([worker(), worker(), worker()]);
+
+      await api('/api/finish?code=' + code, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ photos: snapshot.map((p, i) => ({ url: urls[i], name: p.name })) })
+      });
+
+      openModal(`<h2>배포 완료</h2><div class="code">${code}</div>
+        <p>다른 기기에서 <b>받기</b>를 누르고 이 번호를 입력하세요.<br>24시간 동안 유지됩니다.</p>
+        <div class="row"><button id="copyBtn">번호 복사</button><button class="primary" id="okBtn">확인</button></div>`);
+      $('okBtn').onclick = closeModal;
+      $('copyBtn').onclick = () => { navigator.clipboard && navigator.clipboard.writeText(code); $('copyBtn').textContent = '복사됨'; };
+    } catch (e) {
+      openModal(`<h2>배포 실패</h2><p class="err">${esc(e.message)}</p><div class="row"><button id="okBtn">닫기</button></div>`);
+      $('okBtn').onclick = closeModal;
+    } finally { busy = false; }
+  }
+
+  function openReceive() {
+    if (busy) return;
+    openModal(`<h2>사진 받기</h2>
+      <p>배포할 때 나온 4자리 번호를 입력하세요.${photos.length ? '<br>현재 사진은 받은 사진으로 교체됩니다.' : ''}</p>
+      <input class="codein" id="codeIn" inputmode="numeric" maxlength="4" placeholder="0000" autocomplete="off">
+      <p class="err" id="rerr" style="min-height:1.2em"></p>
+      <div class="row"><button id="cancelBtn">취소</button><button class="primary" id="goBtn">받기</button></div>`);
+    const input = $('codeIn');
+    input.focus();
+    input.addEventListener('input', () => { input.value = input.value.replace(/\D/g, '').slice(0, 4); });
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') receive(); });
+    $('cancelBtn').onclick = closeModal;
+    $('goBtn').onclick = receive;
+  }
+
+  async function receive() {
+    const code = $('codeIn').value;
+    if (!/^\d{4}$/.test(code)) { $('rerr').textContent = '4자리 숫자를 입력해 주세요.'; return; }
+    busy = true; $('goBtn').disabled = true; $('rerr').textContent = '';
+    $('goBtn').textContent = '받는 중…';
+    try {
+      const data = await api('/api/receive?code=' + code);
+      photos.forEach(release);
+      photos = data.photos.map(p => ({ url: p.url, name: p.name }));
+      cur = 0;
+      viewerFront.classList.remove('on'); viewerBack.classList.remove('on');
+      renderThumbs(); show(0, true);
+      closeModal();
+    } catch (e) {
+      $('rerr').textContent = e.message;
+      $('goBtn').disabled = false; $('goBtn').textContent = '받기';
+    } finally { busy = false; }
+  }
+
+  $('pubBtn').addEventListener('click', publish);
+  $('recvBtn').addEventListener('click', openReceive);
+
+  function release(p) { if (p.url.startsWith('blob:')) URL.revokeObjectURL(p.url); }
+
+  updateUI();
+})();
+</script>
+</body>
+</html>
